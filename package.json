@@ -1,0 +1,12 @@
+{
+  "name": "e2e-pipeline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test tests",
+    "lint:shell": "shellcheck -x -P SCRIPTDIR actions/*/*.sh"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
