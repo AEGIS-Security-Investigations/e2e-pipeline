@@ -36,6 +36,7 @@ call it.
 | Path | What it does |
 |---|---|
 | `actions/apt-hardening` | Makes apt survive an Ubuntu mirror mid-sync (config in `/etc/apt/apt.conf.d`, retried `apt-get update` for transient failures only). No-op without root. |
+| `actions/checkout-with-retry` | Checks out the calling repo with plain git: bounded attempts with backoff, waits for a PR's merge ref instead of silently building the head, and optional partial-clone sparse checkout (`sparse-checkout`). A drop-in for `actions/checkout` with `ref`, `fetch-depth` and `token`. |
 | `actions/playwright-install` | Installs Playwright browsers with apt hardening, bounded retries, a cache short-circuit, and a verified no-deps fallback. Needs Bun and a `playwright` package in the caller's workspace. |
 
 ## Roadmap

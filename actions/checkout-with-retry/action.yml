@@ -1,0 +1,150 @@
+name: Checkout code with retry
+description: >-
+  Checks out the calling repository with plain git (no actions/checkout), with a
+  bounded per-attempt timeout and three attempts (AEG-6446: backoff retries for
+  transient git/codeload failures). Waits for GitHub to publish a pull_request
+  merge ref instead of silently building the PR head (AEG-5509), and supports a
+  partial-clone sparse checkout. Load it by full path and pin a SHA:
+  AEGIS-Security-Investigations/e2e-pipeline/actions/checkout-with-retry@<sha>.
+  The token is left in the origin remote URL, so later git push steps in the
+  job authenticate the same way actions/checkout's persisted credentials do.
+
+inputs:
+  ref:
+    description: Ref or SHA to check out. Empty uses the default for the triggering event.
+    required: false
+    default: ""
+  fetch-depth:
+    description: Number of commits to fetch. 0 fetches full history.
+    required: false
+    default: "1"
+  token:
+    description: Token for authenticated git operations. Empty uses the job's github.token.
+    required: false
+    default: ""
+  checkout-timeout:
+    description: >-
+      Per-attempt ceiling for checkout (coreutils timeout duration, e.g. 3m or
+      180s). Composite steps cannot use timeout-minutes, so each attempt is
+      bounded with timeout --kill-after instead.
+    required: false
+    default: "3m"
+  sparse-checkout:
+    description: >-
+      Explicit newline/space separated list of paths to sparse-check-out.
+      In cone mode (the default) these are directories; top-level files are
+      always included. Empty = full checkout.
+    required: false
+    default: ""
+  sparse-checkout-cone-mode:
+    description: >-
+      Whether sparse-checkout uses cone mode (directory prefixes, fast).
+      Set to "false" for gitignore-style patterns with negation.
+    required: false
+    default: "true"
+  allow-head-ref-fallback:
+    description: >-
+      Whether a pull_request checkout may fall back to refs/pull/<n>/head when
+      refs/pull/<n>/merge is unavailable (AEG-5509). The merge ref is always
+      polled first — GitHub computes it asynchronously — and is missing for good
+      only while a PR is conflicted. Falling back builds the PR head WITHOUT the
+      base branch merged in, so this must stay "false" for any job feeding a
+      merge-gating status: a green required check on an unmerged head claims the
+      code was tested against a base it never saw. Set "true" only for jobs that
+      report no required status (notifiers, labelers, cleanup) and would rather
+      run on the head than fail on a conflicted PR.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout code
+      id: checkout-code-initial
+      continue-on-error: true
+      shell: bash
+      env:
+        CHECKOUT_TIMEOUT: ${{ inputs.checkout-timeout }}
+        INPUT_REF: ${{ inputs.ref }}
+        INPUT_FETCH_DEPTH: ${{ inputs.fetch-depth }}
+        INPUT_TOKEN: ${{ inputs.token || github.token }}
+        REPOSITORY: ${{ github.repository }}
+        WORKSPACE: ${{ github.workspace }}
+        GITHUB_REF: ${{ github.ref }}
+        # AEG-5509: last-resort fallback target, used only when
+        # allow-head-ref-fallback is enabled. Empty for non-pull_request events.
+        GITHUB_HEAD_REF: ${{ github.head_ref }}
+        ALLOW_HEAD_REF_FALLBACK: ${{ inputs.allow-head-ref-fallback }}
+        SPARSE_CHECKOUT: ${{ inputs.sparse-checkout }}
+        SPARSE_CHECKOUT_CONE_MODE: ${{ inputs.sparse-checkout-cone-mode }}
+      run: |
+        set -euo pipefail
+        status=0
+        timeout --kill-after=30s "${CHECKOUT_TIMEOUT}" \
+          bash "${{ github.action_path }}/runCheckoutAttempt.sh" || status=$?
+        if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+          echo "::warning::Checkout timed out after ${CHECKOUT_TIMEOUT}; retry will run next."
+        fi
+        exit "$status"
+
+    - name: Back off before checkout retry
+      if: steps.checkout-code-initial.outcome == 'failure'
+      shell: bash
+      run: sleep 8
+
+    - name: Retry checkout code
+      id: checkout-code-retry
+      if: steps.checkout-code-initial.outcome == 'failure'
+      continue-on-error: true
+      shell: bash
+      env:
+        CHECKOUT_TIMEOUT: ${{ inputs.checkout-timeout }}
+        INPUT_REF: ${{ inputs.ref }}
+        INPUT_FETCH_DEPTH: ${{ inputs.fetch-depth }}
+        INPUT_TOKEN: ${{ inputs.token || github.token }}
+        REPOSITORY: ${{ github.repository }}
+        WORKSPACE: ${{ github.workspace }}
+        GITHUB_REF: ${{ github.ref }}
+        GITHUB_HEAD_REF: ${{ github.head_ref }}
+        ALLOW_HEAD_REF_FALLBACK: ${{ inputs.allow-head-ref-fallback }}
+        SPARSE_CHECKOUT: ${{ inputs.sparse-checkout }}
+        SPARSE_CHECKOUT_CONE_MODE: ${{ inputs.sparse-checkout-cone-mode }}
+      run: |
+        set -euo pipefail
+        status=0
+        timeout --kill-after=30s "${CHECKOUT_TIMEOUT}" \
+          bash "${{ github.action_path }}/runCheckoutAttempt.sh" || status=$?
+        if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+          echo "::warning::Checkout timed out after ${CHECKOUT_TIMEOUT} on retry; final attempt will run next."
+        fi
+        exit "$status"
+
+    - name: Back off before final checkout retry
+      if: steps.checkout-code-initial.outcome == 'failure' && steps.checkout-code-retry.outcome == 'failure'
+      shell: bash
+      run: sleep 20
+
+    - name: Final retry checkout code
+      if: steps.checkout-code-initial.outcome == 'failure' && steps.checkout-code-retry.outcome == 'failure'
+      shell: bash
+      env:
+        CHECKOUT_TIMEOUT: ${{ inputs.checkout-timeout }}
+        INPUT_REF: ${{ inputs.ref }}
+        INPUT_FETCH_DEPTH: ${{ inputs.fetch-depth }}
+        INPUT_TOKEN: ${{ inputs.token || github.token }}
+        REPOSITORY: ${{ github.repository }}
+        WORKSPACE: ${{ github.workspace }}
+        GITHUB_REF: ${{ github.ref }}
+        GITHUB_HEAD_REF: ${{ github.head_ref }}
+        ALLOW_HEAD_REF_FALLBACK: ${{ inputs.allow-head-ref-fallback }}
+        SPARSE_CHECKOUT: ${{ inputs.sparse-checkout }}
+        SPARSE_CHECKOUT_CONE_MODE: ${{ inputs.sparse-checkout-cone-mode }}
+      run: |
+        set -euo pipefail
+        status=0
+        timeout --kill-after=30s "${CHECKOUT_TIMEOUT}" \
+          bash "${{ github.action_path }}/runCheckoutAttempt.sh" || status=$?
+        if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+          echo "::error::Checkout timed out after ${CHECKOUT_TIMEOUT} on final retry."
+        fi
+        exit "$status"
