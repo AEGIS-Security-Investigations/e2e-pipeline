@@ -24,6 +24,17 @@ myGuardForce keeps a working local copy until it has run on the shared one.
    myGuardForce.
 7. **Pilot on a second project**, then tag `v1`.
 
+## Runner selection (applies to every step)
+
+Every job in a reusable workflow takes its runner from an input, defaulting to
+`ubuntu-latest`. myGuardForce passes its current Blacksmith sizes (for example
+`blacksmith-2vcpu-ubuntu-2404` for light jobs, and a lane runner such as
+`blacksmith-32vcpu-ubuntu-2404` driven by its `E2E_LANE_RUNNER` variable). Jobs
+with different sizing needs get separate inputs (`runner`, `shard-runner`,
+`lane-runner`) rather than one shared value. Nothing Blacksmith-specific
+(its cache or Docker layer features) may be required. Use it only when it's
+detected, with a plain fallback.
+
 ## Deferred
 
 - **Report and analytics API** (upload runs, durations, flaky specs) to replace

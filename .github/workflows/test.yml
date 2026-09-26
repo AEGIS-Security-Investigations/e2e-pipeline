@@ -27,9 +27,16 @@ jobs:
 
   # Exercises the actions the way a consuming repo does: loaded by path from
   # this checkout, on a real Ubuntu runner with apt.
+  #
+  # Runs on both a GitHub-hosted and a Blacksmith runner: consumers pick the
+  # runner, so every action here has to work on either (see CLAUDE.md).
   playwright-install-smoke:
-    name: playwright-install smoke
-    runs-on: ubuntu-latest
+    name: playwright-install smoke (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, blacksmith-2vcpu-ubuntu-2404]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -41,3 +48,45 @@ jobs:
       - uses: ./actions/playwright-install
       - name: Chromium launches
         run: bunx playwright screenshot --browser=chromium about:blank /tmp/smoke.png
+
+  # Checks this repo out through checkout-with-retry the way a consumer would,
+  # full and sparse, on a GitHub-hosted and a Blacksmith runner. The action is
+  # loaded from a separate copy under _action/ because it rewrites the
+  # workspace's .git.
+  checkout-with-retry-smoke:
+    name: checkout-with-retry smoke (${{ matrix.runner }}, ${{ matrix.mode }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, blacksmith-2vcpu-ubuntu-2404]
+        mode: [full, sparse, history]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: _action
+          persist-credentials: false
+      - uses: ./_action/actions/checkout-with-retry
+        with:
+          sparse-checkout: ${{ matrix.mode == 'sparse' && 'actions' || '' }}
+          fetch-depth: ${{ matrix.mode == 'history' && '0' || '1' }}
+      - name: Checked out the triggering commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -f actions/checkout-with-retry/action.yml
+          if [ "$MODE" = "sparse" ]; then
+            test ! -e tests/aptMirrorResilience.test.ts
+          else
+            test -f tests/aptMirrorResilience.test.ts
+          fi
+          if [ "$MODE" = "history" ]; then
+            # Same as actions/checkout with fetch-depth 0: every branch is
+            # available as origin/<branch>, and history is not shallow.
+            git show-ref --verify refs/remotes/origin/main
+            test "$(git rev-parse --is-shallow-repository)" = "false"
+          fi
