@@ -59,7 +59,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest, blacksmith-2vcpu-ubuntu-2404]
-        mode: [full, sparse]
+        mode: [full, sparse, history]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:
@@ -70,6 +70,7 @@ jobs:
       - uses: ./_action/actions/checkout-with-retry
         with:
           sparse-checkout: ${{ matrix.mode == 'sparse' && 'actions' || '' }}
+          fetch-depth: ${{ matrix.mode == 'history' && '0' || '1' }}
       - name: Checked out the triggering commit
         env:
           EXPECTED_SHA: ${{ github.sha }}
@@ -82,4 +83,10 @@ jobs:
             test ! -e tests/aptMirrorResilience.test.ts
           else
             test -f tests/aptMirrorResilience.test.ts
+          fi
+          if [ "$MODE" = "history" ]; then
+            # Same as actions/checkout with fetch-depth 0: every branch is
+            # available as origin/<branch>, and history is not shallow.
+            git show-ref --verify refs/remotes/origin/main
+            test "$(git rev-parse --is-shallow-repository)" = "false"
           fi

@@ -232,6 +232,32 @@ if [ -z "${effective_ref}" ]; then
   exit 1
 fi
 
+# Pin what the requested ref resolved to before any further fetch rewrites
+# FETCH_HEAD.
+target_sha="$(git rev-parse FETCH_HEAD)"
+
+# Full-history parity with actions/checkout (fetch-depth: 0): it also fetches
+# every branch into refs/remotes/origin/* and every tag, and callers lean on
+# that (diffs against origin/$GITHUB_BASE_REF, `git tag --list` in release
+# scripts). Shallow checkouts keep fetching only the requested ref.
+if [ "${fetch_depth}" = "0" ] || [ -z "${fetch_depth// }" ]; then
+  all_refs_args=(--prune --no-recurse-submodules --tags)
+  if [ "${#sparse_paths[@]}" -gt 0 ]; then
+    all_refs_args+=(--filter=blob:none)
+  fi
+  all_refs_attempt=1
+  until fetch_stderr="$(git fetch origin "${all_refs_args[@]}" "+refs/heads/*:refs/remotes/origin/*" 2>&1 >/dev/null)"; do
+    printf '%s\n' "${fetch_stderr}" >&2
+    if [ "${all_refs_attempt}" -ge "${fetch_transport_attempts}" ] || ! is_transient_git_fetch_error "${fetch_stderr}"; then
+      echo "::error::Fetching all branches and tags for fetch-depth 0 failed (see above)." >&2
+      exit 1
+    fi
+    echo "Transient failure fetching all branches and tags (attempt ${all_refs_attempt}/${fetch_transport_attempts}); retrying in 5s." >&2
+    sleep 5
+    all_refs_attempt=$((all_refs_attempt + 1))
+  done
+fi
+
 branch_name=""
 if [[ "${effective_ref}" == refs/heads/* ]]; then
   branch_name="${effective_ref#refs/heads/}"
@@ -245,9 +271,9 @@ fi
 # unless told to. Files outside the sparse set are left where they are, which is
 # what keeps this action's own source readable for the retry steps.
 if [ -n "${branch_name}" ]; then
-  git checkout --force -B "${branch_name}" FETCH_HEAD
+  git checkout --force -B "${branch_name}" "${target_sha}"
 else
-  git checkout --force FETCH_HEAD
+  git checkout --force "${target_sha}"
 fi
 
 git config --local --unset-all "http.https://github.com/.extraheader" 2>/dev/null || true
