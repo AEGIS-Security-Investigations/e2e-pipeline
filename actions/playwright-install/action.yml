@@ -1,0 +1,79 @@
+name: Install Playwright browsers
+description: >-
+  Installs Playwright browsers and their system libraries in a way that survives
+  an Ubuntu mirror sync ("File has unexpected size ... Mirror sync in progress?",
+  apt exit 100, "Failed to install browsers"). Hardens apt first, retries the
+  install while clearing half-synced apt lists between attempts, and as a last
+  resort installs the browser binaries without --with-deps - proving that choice
+  by launching Chromium before letting the job continue. Retry and fallback are
+  only used for a recognized transient apt/mirror exit-100 failure; all other
+  Playwright failures remain visible immediately.
+
+inputs:
+  browsers:
+    description: Space separated Playwright browser names to install.
+    required: false
+    default: "chromium"
+  with-deps:
+    description: >-
+      Whether to install the browsers' system libraries via apt (--with-deps).
+      Set to "false" on runners that bake the libraries into the image.
+    required: false
+    default: "true"
+  attempts:
+    description: Number of install attempts before the deps fallback is used.
+    required: false
+    default: "3"
+  attempt-timeout:
+    description: >-
+      Per-attempt ceiling for the --with-deps install (coreutils timeout
+      duration, e.g. 90s or 120s). Composite steps cannot use timeout-minutes,
+      so each attempt is bounded with timeout --kill-after instead. Default 90s
+      so hung apt cannot occupy a 16-vCPU runner for 30 minutes (AEG-8528).
+      The no-deps browser download uses browser-download-timeout instead
+      (AEG-10216): Chromium from cdn.playwright.dev often needs more than 90s.
+    required: false
+    default: "90s"
+  browser-download-timeout:
+    description: >-
+      Ceiling for Playwright browser binary downloads with no apt --with-deps
+      (the primary path on runners that bake libraries, and the last-resort
+      fallback after apt gives up). Default 3m so a slow cdn.playwright.dev
+      transfer is not killed at the 90s hung-apt bound (AEG-10216).
+    required: false
+    default: "3m"
+  deps-fallback:
+    description: >-
+      Whether a persistent apt failure may fall back to installing browsers
+      without their system dependencies. The fallback only proceeds when
+      Chromium actually launches afterwards; set to "false" to fail the step
+      instead.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    # Written to /etc/apt/apt.conf.d, so it also applies to the apt-get update
+    # Playwright itself runs from `install --with-deps`. No apt-get update here:
+    # that install runs its own, and this action's retry loop resets the lists
+    # between attempts.
+    # Runs the sibling apt-hardening script from this same checkout of the
+    # action repo rather than `uses:`-ing it: a relative `uses: ./...` resolves
+    # against the CALLER's workspace, and a pinned `uses: org/repo/...@ref`
+    # could drift from the ref this action was loaded at.
+    - name: Harden apt against mirror sync failures
+      if: ${{ inputs.with-deps == 'true' }}
+      shell: bash
+      run: bash "${{ github.action_path }}/../apt-hardening/hardenApt.sh"
+
+    - name: Install Playwright browsers
+      shell: bash
+      env:
+        PW_BROWSERS: ${{ inputs.browsers }}
+        PW_WITH_DEPS: ${{ inputs.with-deps }}
+        PW_INSTALL_ATTEMPTS: ${{ inputs.attempts }}
+        PW_INSTALL_ATTEMPT_TIMEOUT: ${{ inputs.attempt-timeout }}
+        PW_BROWSER_DOWNLOAD_TIMEOUT: ${{ inputs.browser-download-timeout }}
+        PW_DEPS_FALLBACK: ${{ inputs.deps-fallback }}
+      run: bash "${{ github.action_path }}/installBrowsers.sh"

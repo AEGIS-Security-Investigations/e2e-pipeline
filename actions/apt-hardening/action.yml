@@ -1,0 +1,46 @@
+name: Harden apt against Ubuntu mirror sync failures
+description: >-
+  Configures apt to survive an Ubuntu archive/security mirror that is publishing
+  a Release file ahead of its indexes ("File has unexpected size ... Mirror sync
+  in progress?", apt exit 100), and optionally runs apt-get update with retries
+  and a lists reset between attempts. Retries are limited to recognized transient
+  transport/mirror failures; package and configuration errors fail immediately.
+  The configuration is written to
+  /etc/apt/apt.conf.d, so it also covers apt-get invocations this repo does not
+  own - notably the one inside `playwright install --with-deps`. On a runner
+  without apt, root, or passwordless sudo every step is a no-op notice.
+
+inputs:
+  update:
+    description: >-
+      Whether to run apt-get update after writing the configuration. Set to
+      "false" when the caller only wants the hardening applied because a later
+      tool runs its own apt-get update.
+    required: false
+    default: "true"
+  attempts:
+    description: Number of apt-get update attempts before failing the step.
+    required: false
+    default: "4"
+  attempt-timeout:
+    description: >-
+      Per-attempt ceiling for apt-get update (coreutils timeout duration, e.g.
+      5m or 300s). Composite steps cannot use timeout-minutes, so each attempt
+      is bounded with timeout --kill-after instead.
+    required: false
+    default: "5m"
+
+runs:
+  using: composite
+  steps:
+    - name: Configure apt for flaky mirrors
+      shell: bash
+      run: bash "${{ github.action_path }}/hardenApt.sh"
+
+    - name: Update apt package lists with retry
+      if: ${{ inputs.update == 'true' }}
+      shell: bash
+      env:
+        APT_UPDATE_ATTEMPTS: ${{ inputs.attempts }}
+        APT_UPDATE_ATTEMPT_TIMEOUT: ${{ inputs.attempt-timeout }}
+      run: bash "${{ github.action_path }}/aptUpdate.sh"

@@ -1,0 +1,43 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run test
+      - name: Shellcheck action scripts
+        run: bun run lint:shell
+
+  # Exercises the actions the way a consuming repo does: loaded by path from
+  # this checkout, on a real Ubuntu runner with apt.
+  playwright-install-smoke:
+    name: playwright-install smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      # The action drives `bunx playwright`, so a caller needs Bun and a
+      # Playwright package in its workspace.
+      - uses: oven-sh/setup-bun@v2
+      - name: Install a Playwright package to drive the action
+        run: bun add playwright
+      - uses: ./actions/playwright-install
+      - name: Chromium launches
+        run: bunx playwright screenshot --browser=chromium about:blank /tmp/smoke.png
