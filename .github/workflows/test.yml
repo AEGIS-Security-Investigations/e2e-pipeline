@@ -27,9 +27,16 @@ jobs:
 
   # Exercises the actions the way a consuming repo does: loaded by path from
   # this checkout, on a real Ubuntu runner with apt.
+  #
+  # Runs on both a GitHub-hosted and a Blacksmith runner: consumers pick the
+  # runner, so every action here has to work on either (see CLAUDE.md).
   playwright-install-smoke:
-    name: playwright-install smoke
-    runs-on: ubuntu-latest
+    name: playwright-install smoke (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, blacksmith-2vcpu-ubuntu-2404]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5

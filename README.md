@@ -15,6 +15,18 @@ Reference it by path and pin a commit SHA (keep the tag in a comment):
     browsers: chromium
 ```
 
+Runners are the caller's choice. The actions work on GitHub-hosted, Blacksmith
+and self-hosted Ubuntu runners (they probe for sudo and apt rather than assume
+them). Reusable workflows, as they land, take a `runner` input per job:
+
+```yaml
+jobs:
+  e2e:
+    uses: AEGIS-Security-Investigations/e2e-pipeline/.github/workflows/playwright-e2e.yml@<sha>
+    with:
+      runner: blacksmith-4vcpu-ubuntu-2404   # default: ubuntu-latest
+```
+
 This repo is private, so it must have **Settings → Actions → General → Access**
 set to "Accessible from repositories in the organization" for other repos to
 call it.
